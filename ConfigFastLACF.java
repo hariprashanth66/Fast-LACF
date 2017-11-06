@@ -1,4 +1,4 @@
-
+ 
 /**
  * Java program which contains variables  to configure filter as well as 
  * to run as  LA Cuckoo Filter and Fast-LACF.
