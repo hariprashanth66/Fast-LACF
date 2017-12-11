@@ -8,12 +8,12 @@
  */
 public class Bucket {
 	char[] fingerprint;
+	long[] strprint;
 	int size;
 
 	public Bucket() {
-		fingerprint = new char[5];
+		fingerprint = new char[10];
+		strprint = new long[10];
 		size = 0;
-
-		fingerprint[4] = (char) 0;
 	}
 }

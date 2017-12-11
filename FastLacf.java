@@ -1,24 +1,49 @@
- 
+
+import java.io.BufferedWriter;
+import java.io.FileWriter;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.math.BigInteger;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Random;
 
 /**
- * This program implements Position-Aware Cuckoo Filter as well as standard
- * Cuckoo Filter and compare their results with one another in terms of False
- * Positive Rate, storage, Number of elements inserted into the filter.
+ * This program implements Fast Length-Aware Cuckoo Filter
+ * 
  */
 
 public class FastLacf {
 
 	Bucket filter[];
-	int insertedCount;
-	int elementsInsertedCount;
 	int elementsInsertFailCount;
+
+	int popInsertedCount;
+	int unpopInsertedCount;
+
+	int unpopFalsePositiveElements;
+	int popFalsePositiveElements;
+
+	int secondPosCount;
+	int secondPosLookupCount;
+
+	HashMap<Integer, Character> map = new HashMap<>();
+
+	static ArrayList<Long> lookupMissedUnpop = new ArrayList<Long>();
+	static ArrayList<Long> unpopElements = new ArrayList<Long>();
+	static ArrayList<Integer> pos1List = new ArrayList<Integer>();
+	static ArrayList<Integer> pos2List = new ArrayList<Integer>();
+	static ArrayList<Integer> posCheck = new ArrayList<Integer>();
+	static ArrayList<Integer> kicks = new ArrayList<Integer>();
+
+	static HashMap<Long, Boolean> unpopInsertedElements = new HashMap<>();
+	static ArrayList<Long> unpopPositiveLookupElements = new ArrayList<Long>();
+
+	static HashMap<Long, Boolean> popInsertedElements = new HashMap<>();
+	static ArrayList<Long> popPositiveLookupElements = new ArrayList<Long>();
 
 	private final Integer Max_Kicks = ConfigFastLACF.MAX_KICK_OFF;
 	private int filterSize = ConfigFastLACF.NumberofBuckets;
@@ -37,9 +62,13 @@ public class FastLacf {
 		for (int i = 0; i <= filterSize; i++)
 			filter[i] = new Bucket();
 
-		insertedCount = 0;
-		elementsInsertedCount = 0;
+		popInsertedCount = 0;
+		unpopInsertedCount = 0;
+		unpopFalsePositiveElements = 0;
 		elementsInsertFailCount = 0;
+		popFalsePositiveElements = 0;
+		secondPosCount = 0;
+		secondPosLookupCount = 0;
 
 	}
 
@@ -56,9 +85,9 @@ public class FastLacf {
 	 * 
 	 */
 	private void initializeFilter() {
-		for (int i = 0; i <= filterSize; i++) {
-			for (int j = 0; j < 4; j++) {
-				filter[i].fingerprint[j] = (char) 127;
+		for (int i = 0; i < filterSize; i++) {
+			for (int j = 0; j <= 9; j++) {
+				filter[i].fingerprint[j] = (char) 4095;
 				// initializing with 4095 to mark empty cell for a fingerprint
 				// size of 12 bits.
 
@@ -125,13 +154,20 @@ public class FastLacf {
 		BigInteger val = new BigInteger(hashStr, 16);
 		int mappedValue = val.intValue();
 		// System.out.println(mappedValue + " !!!!");
-		mappedValue = (mappedValue & 0xFFF) % 128;
-		// System.out.println(mappedValue + " ****");
+		//// mappedValue = (mappedValue) % 253;
+		mappedValue = (mappedValue & 0xFFF) % 4094;
+
+		// & 0xFFFF
 		if (mappedValue < 0) {
 			mappedValue = mappedValue * -1;
 		}
+		// mappedValue += 1;
+
+		// if (mappedValue == 0)
+		// System.out.println(mappedValue + " ****");
 		char fp = (char) mappedValue;
-		// System.out.println(fp + " --- ");
+
+		// fpList.add(prefix + "");
 		return fp;
 
 	}
@@ -181,31 +217,34 @@ public class FastLacf {
 	 * 
 	 * @return true - insert success. false - insert fail.
 	 */
-	private boolean isInsertSucess(char fp, int position, int hashPosition, int prefixLength) {
-		System.out.println(" in isinsertsuccess");
+	private boolean isInsertSucess(char fp, int position, int prefixLength, long prefix) {
+		// System.out.println(" in isinsertsuccess");
 		// unpopular element
 		if (prefixLength == 1) {
-			System.out.println(" inserting unpop");
-			int upb = (int) filter[position].fingerprint[4];
-			System.out.println("upb =  " + upb);
-			if (upb == (char) 0) {
+
+			int posVal = (int) (filter[position].fingerprint[0]);
+			// System.out.println("check empty cell "+posVal);
+			// checking whether it is empty cell .
+			if (posVal == 4095) { // changed for 12 bits
 				filter[position].fingerprint[0] = fp;
-				filter[position].fingerprint[4] = (char) 1;
-				// changing upb to 1
-				System.out.println(" unpopular element inserted at 0 in bucket " + position);
+				filter[position].strprint[0] = prefix;
 				return true;
+
 			}
 
 		}
 
 		else {
-			System.out.println(" popular element");
-			for (int i = 1; i <= 3; i++) {
-				char posVal = filter[position].fingerprint[i];
-				// if cell is empty, insert the fingerprint.
-				if (posVal == '\u0000') {
+			// System.out.println(" popular element");
+			for (int i = 1; i <= 9; i++) {
+				int posVal = (int) (filter[position].fingerprint[i]);
+				// System.out.println("check empty cell "+posVal);
+				// checking whether it is empty cell .
+				if (posVal == 4095) { // changed for 12 bits
 					filter[position].fingerprint[i] = fp;
-					System.out.println(" element inserted at " + i + "  in bucket " + position);
+					// System.out.println(" element inserted at " + i + " in
+					// bucket " + position);
+					filter[position].strprint[i] = prefix;
 					return true;
 				}
 
@@ -229,14 +268,26 @@ public class FastLacf {
 	 * 
 	 * @return boolean - Insert success or failure.
 	 */
-	private boolean insertItem(char fp, int pos1, int pos2, int prefixLength) {
+	private boolean insertItem(char fp, int pos1, int pos2, int prefixLength, long prefix) {
+		unpopElements.add(Long.valueOf(pos1));
+		unpopElements.add(Long.valueOf(pos2));
 
 		// Try to insert element in either of the two positions.
-		if (isInsertSucess(fp, pos1, 1, prefixLength))
-			return true;
-		if (isInsertSucess(fp, pos2, 2, prefixLength))
-			return true;
+		if (isInsertSucess(fp, pos1, prefixLength, prefix)) {
+			if (prefixLength == 1) {
+				unpopElements.add(Long.valueOf(1));
+			}
 
+			return true;
+		}
+
+		if (isInsertSucess(fp, pos2, prefixLength, prefix)) {
+			if (prefixLength == 1) {
+				unpopElements.add(Long.valueOf(2));
+			}
+
+			return true;
+		}
 		/*
 		 * Since element insertion is full, it will start KickingOFF elements.
 		 * It will be done as, element from position 1 is removed ,say element
@@ -248,9 +299,11 @@ public class FastLacf {
 		 * KickOFF limit.
 		 */
 
+		if (prefixLength == 1)
+			++secondPosCount;
 		int elementKickedOutPos = 0;
 		char tempFp = '\0';
-		int nextInsertPos = 0;
+		long tempstr = 0;
 		// choosing random position to start kick off.
 		Random rand = new Random();
 		int pickPos = rand.nextInt(2);
@@ -265,41 +318,57 @@ public class FastLacf {
 		for (int i = 0; i < Max_Kicks; i++) {
 
 			// choosing random position to insert the fingerprint
+			// System.out.println("Kicking off at " + elementKickedOutPos + " "
+			// + filter[elementKickedOutPos].strprint[randPos]);
+			// kicks.add(elementKickedOutPos);
 
 			int randPos = 0;
 
 			if (prefixLength == 0) {
-				randPos = rand.nextInt(4);
+				randPos = rand.nextInt(9) + 1;
 			}
 
 			tempFp = filter[elementKickedOutPos].fingerprint[randPos];
 			filter[elementKickedOutPos].fingerprint[randPos] = fp;
 
+			// System.out.println(
+			// "Kicking off at " + elementKickedOutPos + " " +
+			// filter[elementKickedOutPos].strprint[randPos]);
+			tempstr = filter[elementKickedOutPos].strprint[randPos];
+			filter[elementKickedOutPos].strprint[randPos] = prefix;
+
+			// if (prefixLength == 1)
+			// System.out.println("kicking an unpop " + tempFp);
+
+			if (map.containsKey(elementKickedOutPos)) {
+				if (map.get(elementKickedOutPos) == (tempFp)) {
+					elementKickedOutPos += filterSize;
+				}
+			}
+
 			int nextPosOfKickedoutElement = (calculatePosition(tempFp + "", hashAlgorithm) ^ elementKickedOutPos);
 
 			nextPosOfKickedoutElement = nextPosOfKickedoutElement % filterSize;
-
-			if (isInsertSucess(tempFp, nextPosOfKickedoutElement, nextInsertPos, prefixLength))
+			// System.out.println("xors " + elementKickedOutPos + " to " +
+			// nextPosOfKickedoutElement);
+			if (isInsertSucess(tempFp, nextPosOfKickedoutElement, prefixLength, tempstr)) {
+				kicks.add(elementKickedOutPos);
+				kicks.add(nextPosOfKickedoutElement);
+				unpopElements.add(Long.valueOf(nextPosOfKickedoutElement));
 				return true;
+			}
+
 			else {
 				fp = tempFp;
 				elementKickedOutPos = nextPosOfKickedoutElement;
 
+				prefix = tempstr;
+				// System.out.println("successivee kicking");
 			}
 
 		}
 
-		// System.out.println("Max Kicks reached");
-		return false;
-
-	}
-
-	private boolean insertToLacf(char fp, int pos1, int pos2, int prefixLength) {
-		if (insertItem(fp, pos1, pos2, prefixLength)) {
-			insertedCount++;
-			return true;
-		}
-
+		System.out.println("Max Kicks reached");
 		return false;
 
 	}
@@ -313,22 +382,38 @@ public class FastLacf {
 	 */
 	private boolean insertIntoFilter(long prefix, int prefixLength) {
 		char fingerprint = generateFingerprint(prefix);
-		System.out.println(" inserting prefix " + prefix + " with fp = " + fingerprint + " length " + prefixLength);
+		// System.out.println(" inserting prefix " + prefix + " with fp = " +
+		// fingerprint + " length " + prefixLength);
 		int pos1 = -1, pos2 = -1;
 
 		pos1 = calculatePosition(String.valueOf(prefix), hashAlgorithm);
 		pos2 = (calculatePosition(fingerprint + "", hashAlgorithm)) ^ pos1;
 		// calculating pos2 by XOR.
 
-		pos2 = pos2 % filterSize;
-		System.out.println(" at pos = " + pos1 + " & " + pos2);
-
-		if (!insertToLacf(fingerprint, pos1, pos2, prefixLength)) {
-			System.out.println(prefix + " not inserted");
-			return false;
+		if (pos2 > filterSize) {
+			pos2 = pos2 % filterSize;
+			map.put(pos2, fingerprint);
 
 		}
-		return true;
+		// System.out.println(" at pos = " + pos1 + " & " + pos2);
+
+		if (insertItem(fingerprint, pos1, pos2, prefixLength, prefix)) {
+			if (prefixLength == 1) {
+				unpopInsertedCount++;
+				unpopElements.add(prefix);
+				unpopInsertedElements.put(prefix, true);
+			} else {
+				popInsertedCount++;
+				popInsertedElements.put(prefix, true);
+			}
+
+			return true;
+
+		}
+
+		System.out.println(prefix + " not inserted at " + prefixLength);
+		return false;
+
 	}
 
 	/**
@@ -368,35 +453,21 @@ public class FastLacf {
 
 	private boolean isIpFound(char fp, int position, int prefixLength) {
 
-		/*
-		 * isPAModeOn : variable to denote Position Aware Mode ON. if it is
-		 * True, then for position 1, it searches from 0(inclusive) till first
-		 * occurence of position 2 element (exclusive)
-		 * 
-		 * if it is False, it can search as standard cuckoo filter, for position
-		 * 1 and position 2, it searches from 0 till 3 (both inclusive).
-		 */
-
 		// checking the bucket corresponding to position 1 of the element..
-		
-		if(prefixLength == 1)
-		{
-			int upb = (int) (filter[position].fingerprint[4]);
-			if (upb == 1) { // changed for 12 bits
-				if (filter[position].fingerprint[0] == fp)
+
+		if (prefixLength == 1) {
+			if (filter[position].fingerprint[0] == fp)
+				return true;
+
+		}
+
+		else {
+			for (int i = 1; i <= 9; i++) {
+				if (filter[position].fingerprint[i] == fp)
 					return true;
 			}
-			
+
 		}
-			
-		else
-		{
-			for (int i = 1; i <= 3; i++) { // changed for 12 bits
-					if (filter[position].fingerprint[i] == fp)
-						return true;
-			}	
-				
-		}		
 
 		return false;
 
@@ -423,36 +494,48 @@ public class FastLacf {
 
 		pos2 = pos2 % filterSize;
 
-		if (isIpFound(fp, pos1, prefixLength))
-			return true;
-		if (isIpFound(fp, pos2, prefixLength))
-			return true;
-		return false;
-	}
-
-	private boolean search(long prefix, int prefixLength) {
-
-		long ip = prefix;
-		// if the element is found in the filter, then return true
-		if (searchInFilter(ip, prefixLength)) {
+		if (isIpFound(fp, pos1, prefixLength)) {
 
 			return true;
 		}
 
-		return false;
+		if (isIpFound(fp, pos2, prefixLength)) {
 
+			++secondPosLookupCount;
+			return true;
+		}
+
+		if (prefixLength == 1) {
+			posCheck.add(pos1);
+			posCheck.add(pos2);
+		}
+		return false;
 	}
 
-	private void lookup(List<String> lookupList, List<Integer> prefixList) throws IOException {
+	private void lookup(List<Long> lookupList, List<Integer> prefixList) throws IOException {
 
 		for (int i = 0; i < lookupList.size(); i++) {
 
-			long prefix = Integer.parseInt(lookupList.get(i));
+			long prefix = lookupList.get(i);
 			int prefixLength = prefixList.get(i);
-			if (search(prefix, prefixLength))
-				elementsInsertedCount++;
+			if (searchInFilter(prefix, prefixLength)) {
+				if (prefixLength == 1) {
+					unpopFalsePositiveElements++;
+					unpopPositiveLookupElements.add(prefix);
+				} else {
+					popFalsePositiveElements++;
+					popPositiveLookupElements.add(prefix);
+				}
+
+			}
+
 			else {
 				elementsInsertFailCount++;
+				// System.out.println(prefix);
+				if (prefixLength == 1) {
+					lookupMissedUnpop.add(prefix);
+				}
+
 			}
 
 		}
@@ -461,7 +544,7 @@ public class FastLacf {
 
 	public void printbucket() {
 		for (int i = 0; i < filter.length; i++) {
-			for (int j = 0; j <= 4; j++)
+			for (int j = 0; j <= 9; j++)
 				System.out.print(filter[i].fingerprint[j] + "\t");
 
 			System.out.println();
@@ -482,24 +565,92 @@ public class FastLacf {
 		FastLacf filterObj = new FastLacf();
 
 		filterObj.initializeFilter();
-		System.out.println("Total inserted entries " + filterObj.insertedCount);
-		System.out.println("False positive count is: " + filterObj.elementsInsertedCount);
+		System.out.println("Total inserted entries " + filterObj.popInsertedCount);
+		System.out.println("False positive count is: " + filterObj.unpopFalsePositiveElements);
 		System.out.println("Failure Count is: " + filterObj.elementsInsertFailCount);
 
 	}
 
-	public int[] executeFilter(FastLacf filterObj, List<Long> ipList, List<Integer> ipPrefixList,
-			List<String> lookupList, List<Integer> lookupPrefixList) throws IOException {
-		//filterObj.initializeFilter();
-		filterObj.printbucket();
-		
+	public int[] executeFilter(FastLacf filterObj, List<Long> ipList, List<Integer> ipPrefixList, List<Long> lookupList,
+			List<Integer> lookupPrefixList) throws IOException {
+		filterObj.initializeFilter();
+		// filterObj.printbucket();
+
 		filterObj.insertInputFile(ipList, ipPrefixList);
-		System.out.println("Insert done");
-		filterObj.printbucket();
 		filterObj.lookup(lookupList, lookupPrefixList);
-		int[] result = new int[2];
-		result[0] = filterObj.insertedCount;
-		result[1] = filterObj.elementsInsertedCount;
+
+		for (long unpopPositivePrefix : unpopPositiveLookupElements) {
+			if (unpopInsertedElements.containsKey(unpopPositivePrefix)) {
+				unpopFalsePositiveElements--;
+			}
+
+		}
+
+		for (long popPositivePrefix : popPositiveLookupElements) {
+			if (popInsertedElements.containsKey(popPositivePrefix)) {
+				popFalsePositiveElements--;
+			}
+
+		}
+
+		int[] result = new int[4];
+		result[0] = filterObj.unpopFalsePositiveElements;
+		result[1] = filterObj.popFalsePositiveElements;
+		result[2] = filterObj.popInsertedCount;
+		result[3] = filterObj.unpopInsertedCount;
+
+		BufferedWriter bw = new BufferedWriter(new FileWriter("C:/Users/Hari/Desktop/fp1235.txt", false));
+
+		for (int i = 1; i < ConfigFastLACF.NumberofBuckets; i++) {
+			for (int j = 0; j <= 9; j++) {
+
+				bw.write(filter[i].strprint[j] + "\t");
+
+			}
+			bw.write("\n");
+		}
+
+		for (int i = 1; i <= unpopElements.size(); i++) {
+			bw.write(unpopElements.get(i - 1) + "\t");
+			if (i % 4 == 0)
+				bw.write("\n");
+		}
+
+		// if (result[0] < result[3])
+		// result[0] = result[3];
+		
+		 System.out.println(result[0] + " fpr " + result[1]);
+		 System.out.println(result[3] + " result " + result[2]);
+
+		bw.write("check ----------------------------------------------------\n");
+		for (int i = 0; i < lookupMissedUnpop.size(); i++) {
+			bw.write(lookupMissedUnpop.get(i) + "\n");
+
+		}
+
+		bw.write("insert ----------------------------------------------------\n");
+		for (int i = 0; i < posCheck.size(); i++) {
+			bw.write(posCheck.get(i) + "\n");
+		}
+
+		bw.write("kickoff ----------------------------------------------------\n");
+		for (int i = 0; i < kicks.size(); i++) {
+			bw.write(kicks.get(i) + "\t");
+			if (i % 2 == 1)
+				bw.write("\n");
+		}
+
+		bw.write("prefixess ----------------------------------------------------\n");
+
+		for (Integer name : map.keySet()) {
+
+			int key = name;
+			char value = map.get(name);
+			// System.out.println(key + " " + value);
+			bw.write("\n " + key + " " + value);
+
+		}
+		bw.close();
 		return result;
 
 	}

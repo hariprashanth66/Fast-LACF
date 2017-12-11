@@ -1,19 +1,24 @@
- 
+
 import java.io.BufferedReader;
-import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileReader;
-import java.io.FileWriter;
 import java.io.IOException;
+import java.text.DecimalFormat;
 import java.util.ArrayList;
 import java.util.List;
 
 public class TestFastLacf {
 
 	static ArrayList<Long> inputList = new ArrayList<Long>();
-	static ArrayList<String> lookupList = new ArrayList<String>();
+	static ArrayList<Long> lookupList = new ArrayList<Long>();
 	static ArrayList<Integer> inputPrefixLengthList = new ArrayList<Integer>();
 	static ArrayList<Integer> lookupPrefixLengthList = new ArrayList<Integer>();
+
+	static int totalElementsInserted = 0;
+	static int unpopElementsInserted = 0;
+
+	static int totalElementsLookedup = 0;
+	static int unpopElementsLookedup = 0;
 
 	/**
 	 * Method to read input file and store it in arraylist
@@ -34,7 +39,7 @@ public class TestFastLacf {
 
 			int index = 0;
 
-			index = ip.indexOf('/');
+			index = ip.indexOf('\\');
 
 			ipPrefix = Integer.parseInt(ip.substring(index + 1));
 			ip = ip.substring(0, index);
@@ -42,10 +47,12 @@ public class TestFastLacf {
 			long prefix = Integer.parseInt(ip);
 
 			inputList.add(prefix);
+			totalElementsInserted++;
 
 			// if unpopular element
 			if (ipPrefix < 14 || ipPrefix > 24) {
 				inputPrefixLengthList.add(1);
+				unpopElementsInserted++;
 			}
 			// if popular element
 			else {
@@ -55,8 +62,8 @@ public class TestFastLacf {
 		}
 
 		buf.close();
-	
-		System.out.println("input file over -----------------------");
+
+		System.out.println("input file reading over " + unpopElementsInserted);
 
 	}
 
@@ -80,27 +87,30 @@ public class TestFastLacf {
 
 			int index = 0;
 
-			index = ip.indexOf('/');
+			index = ip.indexOf('\\');
 
 			ipPrefix = Integer.parseInt(ip.substring(index + 1));
 			ip = ip.substring(0, index);
 
-			lookupList.add(ip);
+			long prefix = Integer.parseInt(ip);
+
+			lookupList.add(prefix);
+			totalElementsLookedup++;
 
 			// if unpopular element
 			if (ipPrefix < 14 || ipPrefix > 24) {
 				lookupPrefixLengthList.add(1);
+				unpopElementsLookedup++;
 			}
 			// if popular element
 			else {
 				lookupPrefixLengthList.add(0);
 			}
 
-
 		}
 		buf.close();
-		
-		System.out.println("lookup file over ----------------------");
+
+		System.out.println("lookup file reading over at " + unpopElementsLookedup);
 
 	}
 
@@ -113,35 +123,90 @@ public class TestFastLacf {
 	public void executeFilter() throws IOException, InterruptedException {
 
 		// number of times filter has to be executed.
-		int loopCount = 10;
+		int loopCount = 1;
 
-		List<Integer> countList = new ArrayList<Integer>();
-		List<Integer> fprList = new ArrayList<Integer>();
+		List<Integer> unpopFPElements = new ArrayList<Integer>();
+		List<Integer> popFPElements = new ArrayList<Integer>();
+		List<Integer> popFilterOccupancy = new ArrayList<Integer>();
+		List<Integer> unpopFilterOccupancy = new ArrayList<Integer>();
 
-		// for(int i=0;i<loopCount;i++)
-		{
+		for (int i = 0; i < loopCount; i++) {
 			FastLacf obj = new FastLacf();
 
 			int[] result = obj.executeFilter(obj, inputList, inputPrefixLengthList, lookupList, lookupPrefixLengthList);
-			countList.add(result[0]);
-			fprList.add(result[1]);
+			// int[] result = obj.executeFilter(obj, inputList,
+			// inputPrefixLengthList, inputList, inputPrefixLengthList);
 
-			// obj = null;
+			unpopFPElements.add(result[0]);
+			popFPElements.add(result[1]);
+			popFilterOccupancy.add(result[2]);
+			unpopFilterOccupancy.add(result[3]);
+
+			obj = null;
 
 		}
-		synchronized (inputList) {
-			BufferedWriter bw = new BufferedWriter(new FileWriter("C:/Users/Hari/Desktop/aaaaa.txt", true));
 
-			for (int i = 0; i < countList.size(); i++) {
-				bw.write(countList.get(i) + " (" + fprList.get(i) + ")                ");
+		int avgUnpopFPElements = 0;
+		int avgPopFPElements = 0;
+		int averagePopFilterOccupancy = 0;
+		int averageUnpopFilterOccupancy = 0;
 
-				if (i % 5 == 0)
-					bw.newLine();
-			}
+		for (int i = 0; i < loopCount; i++) {
+			avgUnpopFPElements += unpopFPElements.get(i);
+			avgPopFPElements += popFPElements.get(i);
+			averagePopFilterOccupancy += popFilterOccupancy.get(i);
+			averageUnpopFilterOccupancy += unpopFilterOccupancy.get(i);
 
-			bw.flush();
-			bw.close();
 		}
+
+		avgUnpopFPElements = avgUnpopFPElements / loopCount;
+		avgPopFPElements = avgPopFPElements / loopCount;
+		averagePopFilterOccupancy = averagePopFilterOccupancy / loopCount;
+		averageUnpopFilterOccupancy = averageUnpopFilterOccupancy / loopCount;
+
+	/*	System.out.println("-----");
+		System.out.println(avgPopFPElements);
+		System.out.println(avgUnpopFPElements);
+		System.out.println("-----");
+		System.out.println(averagePopFilterOccupancy);
+		System.out.println(averageUnpopFilterOccupancy);
+		System.out.println("-----");*/
+
+		DecimalFormat df = new DecimalFormat();
+		df.setMaximumFractionDigits(4);
+
+		System.out.println();
+		double o = (float) (averagePopFilterOccupancy + averageUnpopFilterOccupancy)
+				/ (ConfigFastLACF.NumberofBuckets * 10);
+		int f = 12;
+		System.out.println("filter occupancy percentage = " + o);
+		float u = (float) averageUnpopFilterOccupancy
+				/ (float) (averageUnpopFilterOccupancy + averagePopFilterOccupancy);
+		System.out.println("Unpop fraction = " + u);
+
+		double programUnpopFPR = (float) (avgUnpopFPElements) / unpopElementsLookedup;
+		programUnpopFPR *= 100;
+		double programPopFPR = (float) (avgPopFPElements)
+				/ (totalElementsLookedup - unpopElementsLookedup);
+		programPopFPR *= 100;
+
+
+		double programFPR = (float) (avgPopFPElements + avgUnpopFPElements) / totalElementsLookedup;
+		programFPR *= 100;
+
+		System.out.println();
+		System.out.println("-- Program --  " + df.format(programFPR));
+		System.out.println(" fpr unpop = " + df.format(programUnpopFPR) + "\t fpr pop = " + df.format(programPopFPR));
+
+		double formulaUnpopFPR = (float) (8 * o * u) / Math.pow(2, f);
+		formulaUnpopFPR *= 100;
+		double formulaPopFPR = (float) (8 * o * (1 - u)) / Math.pow(2, f);
+		formulaPopFPR *= 100;
+
+		System.out.println();
+		System.out.println("-- Formula --");
+		System.out.println(" fpr unpop = " + (formulaUnpopFPR) + "\t fpr pop = " + (formulaPopFPR));
+
 	}
 
 	/**
@@ -152,7 +217,6 @@ public class TestFastLacf {
 	 * @throws InterruptedException
 	 */
 	public static void main(String[] args) throws IOException, InterruptedException {
-		// TODO Auto-generated method stub
 
 		TestFastLacf p1 = new TestFastLacf();
 		p1.readinputFile();
